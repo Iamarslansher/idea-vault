@@ -27,17 +27,43 @@ export default function ProfilePage() {
   const [role, setRole] = useState(user?.role || 'Entrepreneur');
   const [location, setLocation] = useState(user?.location || 'Karachi, Pakistan');
   const [bio, setBio] = useState(user?.bio || '');
-  const [profilePicture, setProfilePicture] = useState(null);
+  const [isUploadingPicture, setIsUploadingPicture] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const handleProfilePictureChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !user?.uid) return;
+
+    setIsUploadingPicture(true);
+    try {
+      const photoURL = await firebaseService.uploadProfilePicture(user.uid, file);
+      const updated = await firebaseService.updateUserProfile(user.uid, {
+        ...user,
+        photoURL,
+        avatar: photoURL
+      });
+      dispatch(updateUserProfile(updated));
+      dispatch(setIdeas(ideas.map(idea => (
+        (idea.creatorId || idea.ownerId) === user.uid
+          ? { ...idea, creatorAvatar: photoURL }
+          : idea
+      ))));
+      toast.success('Profile picture updated.');
+    } catch (error) {
+      console.error('Failed to upload profile picture:', error);
+      toast.error(error.message || 'Failed to upload profile picture.');
+    } finally {
+      setIsUploadingPicture(false);
+    }
+  };
 
   const handleUpdate = async (e) => {
     e.preventDefault();
     setSaving(true);
 
     try {
-      const photoURL = profilePicture
-        ? await firebaseService.uploadProfilePicture(user.uid, profilePicture)
-        : user?.photoURL || user?.avatar || '';
+      const photoURL = user?.photoURL || user?.avatar || '';
       const updated = await firebaseService.updateUserProfile(user.uid, {
         displayName,
         role,
@@ -58,7 +84,6 @@ export default function ProfilePage() {
             }
           : idea
       ))));
-      setProfilePicture(null);
       toast.success('Profile details updated! ✨');
     } catch (error) {
       console.error('Failed to update profile:', error);
@@ -126,9 +151,13 @@ export default function ProfilePage() {
             <input
               type="file"
               accept="image/*"
-              onChange={(event) => setProfilePicture(event.target.files?.[0] || null)}
+              onChange={handleProfilePictureChange}
+              disabled={isUploadingPicture}
               className="sr-only"
             />
+            {isUploadingPicture && (
+              <span className="block text-slate-400" role="status">Uploading...</span>
+            )}
           </label>
         </div>
 
@@ -187,11 +216,6 @@ export default function ProfilePage() {
           </div>
 
           <div className="pt-2 flex justify-end">
-            {profilePicture && (
-              <span className="mr-auto self-center text-xs text-slate-500">
-                {profilePicture.name}
-              </span>
-            )}
             <button
               type="submit"
               disabled={saving}

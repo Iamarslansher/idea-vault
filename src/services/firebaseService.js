@@ -21,8 +21,7 @@ import {
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { auth, db, storage, isFirebaseConfigured } from '../config/firebase';
+import { auth, db, isFirebaseConfigured } from '../config/firebase';
 import {
   getStoredIdeas,
   saveStoredIdeas,
@@ -616,53 +615,42 @@ export const firebaseService = {
     return updatedTarget;
   },
 
-  // Upload Profile Picture using Firebase Storage
+  // Upload Profile Picture using Cloudinary
   async uploadProfilePicture(userId, file) {
-    if (isFirebaseConfigured && storage && auth?.currentUser?.uid === userId) {
-      try {
-        const fileExt = file.name.split('.').pop() || 'jpg';
-        const storageRef = ref(storage, `avatars/${userId}/${Date.now()}.${fileExt}`);
-        const snapshot = await uploadBytes(storageRef, file);
-        const downloadURL = await getDownloadURL(snapshot.ref);
-
-        // Update Firestore /users/{userId}
-        if (db) {
-          await setDoc(doc(db, 'users', userId), { photoURL: downloadURL, avatar: downloadURL }, { merge: true });
-        }
-
-        // Update auth currentUser profile
-        if (auth?.currentUser && auth.currentUser.uid === userId) {
-          await fbUpdateProfile(auth.currentUser, { photoURL: downloadURL });
-        }
-
-        // Update stored user
-        const currentUser = getStoredUser();
-        if (currentUser && currentUser.uid === userId) {
-          const updated = { ...currentUser, photoURL: downloadURL, avatar: downloadURL };
-          saveStoredUser(updated);
-        }
-
-        return downloadURL;
-      } catch (err) {
-        throw new Error('Failed to upload profile picture to Firebase Storage.', { cause: err });
-      }
+    const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !uploadPreset) {
+      throw new Error('Cloudinary is not configured. Set the Cloudinary cloud name and upload preset.');
     }
 
-    // Fallback: Local Base64 conversion
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result;
-        const currentUser = getStoredUser();
-        if (currentUser && currentUser.uid === userId) {
-          const updated = { ...currentUser, photoURL: dataUrl, avatar: dataUrl };
-          saveStoredUser(updated);
-        }
-        resolve(dataUrl);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', uploadPreset);
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      { method: 'POST', body: formData }
+    );
+    const result = await response.json();
+    if (!response.ok) {
+      throw new Error(result.error?.message || 'Cloudinary image upload failed.');
+    }
+    if (!result.secure_url) {
+      throw new Error('Cloudinary did not return a secure image URL.');
+    }
+
+    const photoURL = result.secure_url;
+    if (isFirebaseConfigured && db && auth?.currentUser?.uid === userId) {
+      await setDoc(doc(db, 'users', userId), { photoURL, avatar: photoURL }, { merge: true });
+      await fbUpdateProfile(auth.currentUser, { photoURL });
+    }
+
+    const currentUser = getStoredUser();
+    if (currentUser && currentUser.uid === userId) {
+      saveStoredUser({ ...currentUser, photoURL, avatar: photoURL });
+    }
+
+    return photoURL;
   },
 
   // Update user profile in Firestore and local state
