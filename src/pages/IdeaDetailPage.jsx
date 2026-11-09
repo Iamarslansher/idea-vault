@@ -30,6 +30,7 @@ import ConfirmationModal from '../components/common/ConfirmationModal';
 import { toggleLikeLocal, toggleBookmark, deleteIdea, incrementViewsLocal } from '../store/slices/ideasSlice';
 import { openAuthModal } from '../store/slices/uiSlice';
 import { firebaseService } from '../services/firebaseService';
+import { auth } from '../config/firebase';
 import { formatPKR, formatRelativeTime } from '../utils/formatters';
 import toast from 'react-hot-toast';
 
@@ -73,10 +74,8 @@ export default function IdeaDetailPage() {
     );
   }
 
-  const isOwner = Boolean(
-    isAuthenticated &&
-    user?.uid &&
-    (user.uid === idea.creatorId || user.uid === idea.ownerId)
+  const isOwner = [auth?.currentUser?.uid, user?.uid].some(
+    userId => userId && (userId === idea.ownerId || userId === idea.creatorId)
   );
   const isLiked = Boolean(isAuthenticated && user?.uid && Array.isArray(idea.likedBy) && idea.likedBy.includes(user.uid));
   const isBookmarked = bookmarks.includes(idea.id);

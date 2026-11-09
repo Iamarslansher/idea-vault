@@ -23,6 +23,10 @@ export default function CommitmentModal({ idea, isOpen, onClose }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (user?.uid && (idea.creatorId === user.uid || idea.ownerId === user.uid)) {
+      toast.error('You cannot request collaboration on your own idea.');
+      return;
+    }
     if (!message.trim()) {
       toast.error('Please write a brief note on how you would like to collaborate.');
       return;
@@ -197,4 +201,3 @@ export default function CommitmentModal({ idea, isOpen, onClose }) {
     </AnimatePresence>
   );
 }
-

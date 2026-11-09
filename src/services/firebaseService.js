@@ -15,8 +15,10 @@ import {
   updateDoc,
   deleteDoc,
   query,
+  where,
   orderBy,
   onSnapshot,
+  writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -167,6 +169,53 @@ export const firebaseService = {
 
   getCurrentUser() {
     return getStoredUser();
+  },
+
+  subscribeToCommitments(userId, onChange, onError = console.error) {
+    if (
+      !isFirebaseConfigured ||
+      !db ||
+      !userId ||
+      auth?.currentUser?.uid !== userId
+    ) return () => {};
+
+    const records = {
+      incoming: new Map(),
+      sent: new Map()
+    };
+
+    const emit = () => {
+      const commitments = new Map([...records.incoming, ...records.sent]);
+      const list = [...commitments.values()].sort(
+        (a, b) => (b.timestamp || b.createdAt || 0) - (a.timestamp || a.createdAt || 0)
+      );
+      saveStoredCommitments(list);
+      onChange(list);
+    };
+
+    const listen = (key, field) => onSnapshot(
+      query(collection(db, 'commitments'), where(field, '==', userId)),
+      snapshot => {
+        records[key] = new Map(
+          snapshot.docs.map(commitmentDoc => [
+            commitmentDoc.id,
+            { id: commitmentDoc.id, ...commitmentDoc.data() }
+          ])
+        );
+        emit();
+      },
+      error => {
+        console.error(`Failed to subscribe to ${key} commitments:`, error);
+        onError(error);
+      }
+    );
+
+    const unsubscribeIncoming = listen('incoming', 'ideaCreatorId');
+    const unsubscribeSent = listen('sent', 'userId');
+    return () => {
+      unsubscribeIncoming();
+      unsubscribeSent();
+    };
   },
 
   // Ideas CRUD
@@ -385,10 +434,15 @@ export const firebaseService = {
   async addCommitment(ideaId, { role, roleLabel, message, user }) {
     const currentIdeas = getStoredIdeas();
     const target = currentIdeas.find(i => i.id === ideaId);
-    if (!target) return null;
+    if (!target) throw new Error('The idea could not be found.');
 
     const commitmentId = 'cmt-' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
     const creatorId = target.creatorId || target.ownerId;
+    if (!user?.uid) throw new Error('You must be signed in to request collaboration.');
+    if (!creatorId) throw new Error('The idea creator could not be identified.');
+    if (creatorId && creatorId === user.uid) {
+      throw new Error('You cannot request collaboration on your own idea.');
+    }
     const now = Date.now();
 
     const commitment = {
@@ -417,13 +471,33 @@ export const firebaseService = {
       createdAt: now
     };
 
-    // Save to Firestore commitments collection
-    if (isFirebaseConfigured && db) {
-      try {
-        await setDoc(doc(db, 'commitments', commitmentId), commitment);
-      } catch (e) {
-        console.warn('Firestore setDoc commitment warning:', e);
+    let notification = null;
+    if (isFirebaseConfigured && db && auth?.currentUser?.uid === user.uid) {
+      const batch = writeBatch(db);
+      const commitmentRef = doc(db, 'commitments', commitmentId);
+      batch.set(commitmentRef, commitment);
+      if (creatorId) {
+        const notificationRef = doc(collection(db, 'notifications'));
+        notification = {
+          id: notificationRef.id,
+          recipientId: creatorId,
+          userId: creatorId,
+          senderId: user.uid,
+          senderName: user.displayName || 'A Member',
+          senderAvatar: user.photoURL || user.avatar,
+          type: 'commitment',
+          title: 'New Collaboration Request!',
+          message: `${user.displayName || 'A member'} requested to collaborate as "${roleLabel}" on "${target.title}"`,
+          ideaId: target.id,
+          commitmentId,
+          status: 'pending',
+          createdAt: now,
+          timestamp: now,
+          read: false
+        };
+        batch.set(notificationRef, notification);
       }
+      await batch.commit();
     }
 
     const existingCommitments = Array.isArray(target.commitments) ? target.commitments : [];
@@ -443,11 +517,10 @@ export const firebaseService = {
     const allUpdated = currentIdeas.map(i => i.id === ideaId ? updatedIdea : i);
     saveStoredIdeas(allUpdated);
 
-    // Create notification in notifications collection for the idea creator
-    if (creatorId) {
-      const notifId = 'notif-' + now;
-      const notifData = {
-        id: notifId,
+    if (notification) saveStoredNotification(notification);
+    else if (creatorId) {
+      saveStoredNotification({
+        id: 'notif-' + now,
         recipientId: creatorId,
         userId: creatorId,
         senderId: user.uid,
@@ -462,51 +535,70 @@ export const firebaseService = {
         createdAt: now,
         timestamp: now,
         read: false
-      };
-
-      if (isFirebaseConfigured && db) {
-        try {
-          await setDoc(doc(db, 'notifications', notifId), notifData);
-        } catch (e) {
-          console.warn('Firestore setDoc notification warning:', e);
-        }
-      }
-
-      saveStoredNotification(notifData);
+      });
     }
 
     return commitment;
   },
 
   async updateCommitmentStatus(commitmentId, status) {
+    if (!['accepted', 'rejected'].includes(status)) {
+      throw new Error('Invalid collaboration request status.');
+    }
     const now = Date.now();
 
-    // 1. Update in Firestore
-    if (isFirebaseConfigured && db) {
-      try {
-        const docRef = doc(db, 'commitments', commitmentId);
-        await updateDoc(docRef, {
-          status,
-          updatedAt: now
-        });
-      } catch (e) {
-        console.warn('Firestore commitment status update warning:', e);
-      }
-    }
-
-    // 2. Update in stored commitments
     const allCommitments = getStoredCommitments();
     let updatedTarget = null;
-    const updatedCommitments = allCommitments.map(c => {
-      if (c.id === commitmentId) {
-        updatedTarget = { ...c, status, updatedAt: now };
-        return updatedTarget;
+    updatedTarget = allCommitments.find(c => c.id === commitmentId) || null;
+
+    if (!updatedTarget && isFirebaseConfigured && db) {
+      const commitmentSnapshot = await getDoc(doc(db, 'commitments', commitmentId));
+      if (commitmentSnapshot.exists()) {
+        updatedTarget = { id: commitmentSnapshot.id, ...commitmentSnapshot.data() };
       }
-      return c;
-    });
+    }
+    if (!updatedTarget) throw new Error('Collaboration request could not be found.');
+
+    const recipientId = updatedTarget.senderId || updatedTarget.userId;
+    const notificationId = 'notif-' + now + '-' + Math.random().toString(36).slice(2, 8);
+    const notification = recipientId ? {
+      id: notificationId,
+      recipientId,
+      userId: recipientId,
+      senderId: updatedTarget.creatorId || updatedTarget.ideaCreatorId,
+      type: 'commitment_status',
+      title: status === 'accepted' ? 'Collaboration Request Accepted! 🟢' : 'Collaboration Request Declined 🔴',
+      message: `Your collaboration request on "${updatedTarget.ideaTitle || 'idea'}" was ${status}.`,
+      ideaId: updatedTarget.ideaId,
+      commitmentId,
+      status,
+      createdAt: now,
+      timestamp: now,
+      read: false
+    } : null;
+
+    if (
+      isFirebaseConfigured &&
+      db &&
+      auth?.currentUser?.uid === (updatedTarget.creatorId || updatedTarget.ideaCreatorId)
+    ) {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'commitments', commitmentId), { status, updatedAt: now });
+      if (notification) {
+        batch.set(doc(db, 'notifications', notificationId), notification);
+      }
+      await batch.commit();
+    }
+
+    updatedTarget = { ...updatedTarget, status, updatedAt: now };
+    const updatedCommitments = allCommitments.map(c => (
+      c.id === commitmentId ? updatedTarget : c
+    ));
+    if (!allCommitments.some(c => c.id === commitmentId)) {
+      updatedCommitments.unshift(updatedTarget);
+    }
     saveStoredCommitments(updatedCommitments);
 
-    // 3. Update target idea's embedded commitments array
     if (updatedTarget?.ideaId) {
       const allIdeas = getStoredIdeas();
       const updatedIdeas = allIdeas.map(idea => {
@@ -519,46 +611,14 @@ export const firebaseService = {
       saveStoredIdeas(updatedIdeas);
     }
 
-    // 4. Create notification for the requester/sender
-    if (updatedTarget?.senderId || updatedTarget?.userId) {
-      const recipientId = updatedTarget.senderId || updatedTarget.userId;
-      const notifId = 'notif-' + now;
-      const statusTitle = status === 'accepted' ? 'Collaboration Request Accepted! 🟢' : 'Collaboration Request Declined 🔴';
-      const statusMessage = `Your collaboration request on "${updatedTarget.ideaTitle || 'idea'}" was ${status}.`;
-
-      const notifData = {
-        id: notifId,
-        recipientId,
-        userId: recipientId,
-        senderId: updatedTarget.creatorId,
-        type: 'commitment_status',
-        title: statusTitle,
-        message: statusMessage,
-        ideaId: updatedTarget.ideaId,
-        commitmentId,
-        status,
-        createdAt: now,
-        timestamp: now,
-        read: false
-      };
-
-      if (isFirebaseConfigured && db) {
-        try {
-          await setDoc(doc(db, 'notifications', notifId), notifData);
-        } catch (e) {
-          console.warn('Firestore setDoc notification warning:', e);
-        }
-      }
-
-      saveStoredNotification(notifData);
-    }
+    if (notification) saveStoredNotification(notification);
 
     return updatedTarget;
   },
 
   // Upload Profile Picture using Firebase Storage
   async uploadProfilePicture(userId, file) {
-    if (isFirebaseConfigured && storage) {
+    if (isFirebaseConfigured && storage && auth?.currentUser?.uid === userId) {
       try {
         const fileExt = file.name.split('.').pop() || 'jpg';
         const storageRef = ref(storage, `avatars/${userId}/${Date.now()}.${fileExt}`);
@@ -584,7 +644,7 @@ export const firebaseService = {
 
         return downloadURL;
       } catch (err) {
-        console.warn('Firebase Storage upload warning, using local file reader:', err);
+        throw new Error('Failed to upload profile picture to Firebase Storage.', { cause: err });
       }
     }
 
@@ -607,27 +667,52 @@ export const firebaseService = {
 
   // Update user profile in Firestore and local state
   async updateUserProfile(userId, profileData) {
-    if (isFirebaseConfigured && db) {
-      try {
-        const userRef = doc(db, 'users', userId);
-        await setDoc(userRef, profileData, { merge: true });
-      } catch (err) {
-        console.warn('Firestore user update warning:', err);
-      }
+    const hasCloudIdentity = Boolean(
+      isFirebaseConfigured && db && auth?.currentUser?.uid === userId
+    );
+    if (hasCloudIdentity) {
+      await setDoc(doc(db, 'users', userId), profileData, { merge: true });
     }
 
-    if (auth?.currentUser && auth.currentUser.uid === userId) {
-      try {
-        await fbUpdateProfile(auth.currentUser, {
-          displayName: profileData.displayName || auth.currentUser.displayName,
-          photoURL: profileData.photoURL || profileData.avatar || auth.currentUser.photoURL
-        });
-      } catch (err) {}
+    if (hasCloudIdentity) {
+      await fbUpdateProfile(auth.currentUser, {
+        displayName: profileData.displayName || auth.currentUser.displayName,
+        photoURL: profileData.photoURL || profileData.avatar || auth.currentUser.photoURL
+      });
     }
 
     const currentUser = getStoredUser();
     const updatedUser = { ...(currentUser || {}), ...profileData, uid: userId };
     saveStoredUser(updatedUser);
+
+    const ideas = getStoredIdeas();
+    const updatedIdeas = ideas.map(idea => (
+      (idea.creatorId || idea.ownerId) === userId
+        ? {
+            ...idea,
+            creatorName: profileData.displayName || idea.creatorName,
+            creatorRole: profileData.role || idea.creatorRole,
+            creatorAvatar: profileData.photoURL || profileData.avatar || idea.creatorAvatar
+          }
+        : idea
+    ));
+    saveStoredIdeas(updatedIdeas);
+
+    if (hasCloudIdentity) {
+      const ownedIdeas = await getDocs(query(
+        collection(db, 'ideas'),
+        where('creatorId', '==', userId)
+      ));
+      await Promise.all(ownedIdeas.docs.map(ideaDoc => updateDoc(
+        ideaDoc.ref,
+        {
+          creatorName: profileData.displayName,
+          creatorRole: profileData.role,
+          creatorAvatar: profileData.photoURL || profileData.avatar
+        }
+      )));
+    }
+
     return updatedUser;
   },
 
@@ -655,4 +740,3 @@ export const firebaseService = {
     return null;
   }
 };
-

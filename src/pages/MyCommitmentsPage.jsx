@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import EmptyState from '../components/common/EmptyState';
-import { updateCommitmentStatus } from '../store/slices/commitmentsSlice';
+import { setCommitments, updateCommitmentStatus } from '../store/slices/commitmentsSlice';
 import { updateIdeaCommitmentStatusLocal } from '../store/slices/ideasSlice';
 import { firebaseService } from '../services/firebaseService';
 import { formatPKR, formatRelativeTime } from '../utils/formatters';
@@ -25,6 +25,15 @@ export default function MyCommitmentsPage() {
   const dispatch = useDispatch();
   const { items: commitments } = useSelector((state) => state.commitments);
   const { user } = useSelector((state) => state.auth);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+    return firebaseService.subscribeToCommitments(
+      user.uid,
+      (liveCommitments) => dispatch(setCommitments(liveCommitments)),
+      () => toast.error('Live commitment updates are temporarily unavailable.')
+    );
+  }, [dispatch, user?.uid]);
 
   // Incoming requests on the user's ideas
   const incomingRequests = commitments.filter(

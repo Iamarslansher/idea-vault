@@ -142,12 +142,9 @@ export default function IdeaCard({ idea, onCommitClick }) {
       <div>
         {/* Creator Header */}
         <div className="flex items-center justify-between gap-3 mb-3.5">
-          <div
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              navigate(`/user/${idea.creatorId || idea.ownerId || 'unknown'}`);
-            }}
+          <Link
+            to={`/user/${idea.creatorId || idea.ownerId || 'unknown'}`}
+            onClick={(e) => e.stopPropagation()}
             className="flex items-center gap-2.5 min-w-0 group/creator cursor-pointer"
             title={`View ${idea.creatorName}'s public profile`}
           >
@@ -165,7 +162,7 @@ export default function IdeaCard({ idea, onCommitClick }) {
                 <span>{formatRelativeTime(idea.createdAt)}</span>
               </div>
             </div>
-          </div>
+          </Link>
 
           {/* Quick Actions (Bookmark & Share) */}
           <div className="flex items-center gap-1 shrink-0">
@@ -300,4 +297,3 @@ export default function IdeaCard({ idea, onCommitClick }) {
     </motion.div>
   );
 }
-

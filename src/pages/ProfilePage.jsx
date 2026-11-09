@@ -14,36 +14,58 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { updateUserProfile, setAuthSuccess, logout } from '../store/slices/authSlice';
-import { saveStoredUser } from '../services/storageService';
+import { setIdeas } from '../store/slices/ideasSlice';
 import { firebaseService, DEMO_USERS } from '../services/firebaseService';
 import { isFirebaseConfigured } from '../config/firebase';
 
 export default function ProfilePage() {
   const dispatch = useDispatch();
   const { user, isAuthenticated } = useSelector((state) => state.auth);
+  const { items: ideas } = useSelector((state) => state.ideas);
 
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [role, setRole] = useState(user?.role || 'Entrepreneur');
   const [location, setLocation] = useState(user?.location || 'Karachi, Pakistan');
   const [bio, setBio] = useState(user?.bio || '');
+  const [profilePicture, setProfilePicture] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const handleUpdate = (e) => {
+  const handleUpdate = async (e) => {
     e.preventDefault();
     setSaving(true);
 
-    const updated = {
-      ...user,
-      displayName,
-      role,
-      location,
-      bio
-    };
+    try {
+      const photoURL = profilePicture
+        ? await firebaseService.uploadProfilePicture(user.uid, profilePicture)
+        : user?.photoURL || user?.avatar || '';
+      const updated = await firebaseService.updateUserProfile(user.uid, {
+        displayName,
+        role,
+        location,
+        bio,
+        photoURL,
+        avatar: photoURL
+      });
 
-    saveStoredUser(updated);
-    dispatch(updateUserProfile(updated));
-    setSaving(false);
-    toast.success('Profile details updated! ✨');
+      dispatch(updateUserProfile(updated));
+      dispatch(setIdeas(ideas.map(idea => (
+        (idea.creatorId || idea.ownerId) === user.uid
+          ? {
+              ...idea,
+              creatorName: updated.displayName,
+              creatorRole: updated.role,
+              creatorAvatar: updated.photoURL || updated.avatar
+            }
+          : idea
+      ))));
+      setProfilePicture(null);
+      toast.success('Profile details updated! ✨');
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      toast.error(error.message || 'Failed to update profile.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDemoSwitch = async (index) => {
@@ -80,7 +102,7 @@ export default function ProfilePage() {
       <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200 shadow-soft">
         <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 pb-6 border-b border-slate-100 text-center sm:text-left">
           <img
-            src={user?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${user?.displayName}`}
+            src={user?.photoURL || user?.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${user?.displayName}`}
             alt={user?.displayName}
             className="w-20 h-20 rounded-full object-cover border-2 border-slate-200 shadow-md shrink-0"
           />
@@ -99,6 +121,15 @@ export default function ProfilePage() {
               </span>
             </div>
           </div>
+          <label className="text-xs font-semibold text-blue-600 hover:text-blue-700 cursor-pointer">
+            Update profile picture
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(event) => setProfilePicture(event.target.files?.[0] || null)}
+              className="sr-only"
+            />
+          </label>
         </div>
 
         {/* Profile Edit Form */}
@@ -156,6 +187,11 @@ export default function ProfilePage() {
           </div>
 
           <div className="pt-2 flex justify-end">
+            {profilePicture && (
+              <span className="mr-auto self-center text-xs text-slate-500">
+                {profilePicture.name}
+              </span>
+            )}
             <button
               type="submit"
               disabled={saving}
@@ -248,4 +284,3 @@ export default function ProfilePage() {
     </div>
   );
 }
-
