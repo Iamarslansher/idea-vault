@@ -97,6 +97,17 @@ const ideasSlice = createSlice({
         target.commitmentsCount = target.commitments.length;
       }
     },
+    updateIdeaCommitmentStatusLocal(state, action) {
+      const { commitmentId, status } = action.payload;
+      state.items.forEach(idea => {
+        if (Array.isArray(idea.commitments)) {
+          const match = idea.commitments.find(c => c.id === commitmentId);
+          if (match) {
+            match.status = status;
+          }
+        }
+      });
+    },
     setFilters(state, action) {
       return { ...state, ...action.payload };
     },
@@ -123,6 +134,7 @@ export const {
   incrementViewsLocal,
   addCommentLocal,
   addCommitmentLocal,
+  updateIdeaCommitmentStatusLocal,
   setFilters,
   resetFilters
 } = ideasSlice.actions;

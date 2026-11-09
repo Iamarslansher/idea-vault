@@ -16,6 +16,7 @@ import MyCommitmentsPage from './pages/MyCommitmentsPage';
 import LikedIdeasPage from './pages/LikedIdeasPage';
 import AIGeneratorPage from './pages/AIGeneratorPage';
 import ProfilePage from './pages/ProfilePage';
+import PublicProfilePage from './pages/PublicProfilePage';
 import AboutPage from './pages/AboutPage';
 import NotFoundPage from './pages/NotFoundPage';
 
@@ -69,6 +70,7 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/explore" element={<ExplorePage />} />
           <Route path="/ideas/:id" element={<IdeaDetailPage />} />
+          <Route path="/user/:userId" element={<PublicProfilePage />} />
           <Route path="/ai-generator" element={<AIGeneratorPage />} />
           <Route path="/about" element={<AboutPage />} />
         </Route>

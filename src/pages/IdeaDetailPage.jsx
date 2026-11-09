@@ -73,7 +73,11 @@ export default function IdeaDetailPage() {
     );
   }
 
-  const isOwner = Boolean(isAuthenticated && user?.uid && user.uid === idea.creatorId);
+  const isOwner = Boolean(
+    isAuthenticated &&
+    user?.uid &&
+    (user.uid === idea.creatorId || user.uid === idea.ownerId)
+  );
   const isLiked = Boolean(isAuthenticated && user?.uid && Array.isArray(idea.likedBy) && idea.likedBy.includes(user.uid));
   const isBookmarked = bookmarks.includes(idea.id);
 
@@ -197,14 +201,18 @@ export default function IdeaDetailPage() {
         
         {/* Creator Info */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
-          <div className="flex items-center gap-3">
+          <Link
+            to={`/user/${idea.creatorId || idea.ownerId || 'unknown'}`}
+            className="flex items-center gap-3 group/creator"
+            title={`View ${idea.creatorName}'s public profile`}
+          >
             <img
               src={idea.creatorAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${idea.creatorName}`}
               alt={idea.creatorName}
-              className="w-12 h-12 rounded-full object-cover border border-slate-200 shadow-xs shrink-0"
+              className="w-12 h-12 rounded-full object-cover border border-slate-200 shadow-xs shrink-0 group-hover/creator:ring-2 group-hover/creator:ring-blue-500 transition-all"
             />
             <div>
-              <div className="text-sm font-bold text-slate-900">
+              <div className="text-sm font-bold text-slate-900 group-hover/creator:text-blue-600 transition underline-offset-2 group-hover/creator:underline">
                 {idea.creatorName}
               </div>
               <div className="text-xs text-slate-500 flex items-center gap-2">
@@ -216,7 +224,7 @@ export default function IdeaDetailPage() {
                 </span>
               </div>
             </div>
-          </div>
+          </Link>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
             <span className="text-xs font-semibold px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
@@ -307,21 +315,28 @@ export default function IdeaDetailPage() {
             </span>
           </motion.button>
 
-          {/* I'm Interested Collaboration CTA */}
-          <button
-            type="button"
-            onClick={() => {
-              if (!isAuthenticated) {
-                dispatch(openAuthModal({ intent: 'Sign in to express interest in collaborating on this idea.' }));
-              } else {
-                setIsCommitModalOpen(true);
-              }
-            }}
-            className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm sm:text-base shadow-md shadow-blue-600/20 hover:shadow-lg transition"
-          >
-            <Handshake className="w-5 h-5" />
-            <span>I'm Interested / Request Collaboration</span>
-          </button>
+          {/* I'm Interested Collaboration CTA or Owner restriction */}
+          {isOwner ? (
+            <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-4 py-2.5 rounded-2xl border border-slate-200 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4 text-slate-400" />
+              <span>This is your own idea</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (!isAuthenticated) {
+                  dispatch(openAuthModal({ intent: 'Sign in to express interest in collaborating on this idea.' }));
+                } else {
+                  setIsCommitModalOpen(true);
+                }
+              }}
+              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm sm:text-base shadow-md shadow-blue-600/20 hover:shadow-lg transition"
+            >
+              <Handshake className="w-5 h-5" />
+              <span>I'm Interested / Request Collaboration</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -468,20 +483,26 @@ export default function IdeaDetailPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (!isAuthenticated) {
-                dispatch(openAuthModal({ intent: 'Sign in to join as a collaborator.' }));
-              } else {
-                setIsCommitModalOpen(true);
-              }
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs transition"
-          >
-            <Handshake className="w-4 h-4" />
-            <span>Join Venture</span>
-          </button>
+          {isOwner ? (
+            <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+              This is your own idea
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (!isAuthenticated) {
+                  dispatch(openAuthModal({ intent: 'Sign in to join as a collaborator.' }));
+                } else {
+                  setIsCommitModalOpen(true);
+                }
+              }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs transition"
+            >
+              <Handshake className="w-4 h-4" />
+              <span>Join Venture</span>
+            </button>
+          )}
         </div>
 
         {commitmentsList.length === 0 ? (

@@ -38,6 +38,11 @@ export default function IdeaCard({ idea, onCommitClick }) {
   );
 
   const isBookmarked = bookmarks.includes(idea.id);
+  const isOwner = Boolean(
+    isAuthenticated &&
+    user?.uid &&
+    (idea.creatorId === user.uid || idea.ownerId === user.uid)
+  );
 
   const handleLike = async (e) => {
     e.preventDefault();
@@ -137,14 +142,22 @@ export default function IdeaCard({ idea, onCommitClick }) {
       <div>
         {/* Creator Header */}
         <div className="flex items-center justify-between gap-3 mb-3.5">
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              navigate(`/user/${idea.creatorId || idea.ownerId || 'unknown'}`);
+            }}
+            className="flex items-center gap-2.5 min-w-0 group/creator cursor-pointer"
+            title={`View ${idea.creatorName}'s public profile`}
+          >
             <img
               src={idea.creatorAvatar || `https://api.dicebear.com/7.x/initials/svg?seed=${idea.creatorName}`}
               alt={idea.creatorName}
-              className="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200 shadow-xs"
+              className="w-10 h-10 rounded-full object-cover shrink-0 border border-slate-200 shadow-xs group-hover/creator:ring-2 group-hover/creator:ring-blue-500 transition-all"
             />
             <div className="min-w-0">
-              <div className="text-xs font-bold text-slate-900 group-hover:text-blue-600 transition truncate">
+              <div className="text-xs font-bold text-slate-900 group-hover/creator:text-blue-600 transition truncate underline-offset-2 group-hover/creator:underline">
                 {idea.creatorName}
               </div>
               <div className="flex items-center gap-1 text-[11px] text-slate-400">
@@ -268,15 +281,21 @@ export default function IdeaCard({ idea, onCommitClick }) {
           </div>
         </div>
 
-        {/* I'm Interested CTA */}
-        <button
-          type="button"
-          onClick={handleCommit}
-          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 transition"
-        >
-          <Handshake className="w-3.5 h-3.5" />
-          <span>I'm Interested</span>
-        </button>
+        {/* I'm Interested CTA or Owner indicator */}
+        {isOwner ? (
+          <span className="text-[11px] font-semibold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-xl">
+            This is your own idea
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={handleCommit}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 transition"
+          >
+            <Handshake className="w-3.5 h-3.5" />
+            <span>I'm Interested</span>
+          </button>
+        )}
       </div>
     </motion.div>
   );
